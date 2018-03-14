@@ -31,8 +31,7 @@ android {
 }
 
 dependencies {
-    compile project(modulePrefix + 'library-core')
-    androidTestCompile project(modulePrefix + 'testutils')
+      compile project(':libraries:exoplayer:library:core')
 }
 
 ext {
