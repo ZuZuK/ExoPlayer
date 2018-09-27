@@ -17,32 +17,31 @@ package com.google.android.exoplayer2.castdemo;
 
 import android.content.Context;
 import android.net.Uri;
+import android.support.annotation.Nullable;
 import android.view.KeyEvent;
 import android.view.View;
 import com.google.android.exoplayer2.C;
 import com.google.android.exoplayer2.DefaultRenderersFactory;
 import com.google.android.exoplayer2.ExoPlayerFactory;
 import com.google.android.exoplayer2.Player;
-import com.google.android.exoplayer2.Player.DefaultEventListener;
 import com.google.android.exoplayer2.Player.DiscontinuityReason;
+import com.google.android.exoplayer2.Player.EventListener;
+import com.google.android.exoplayer2.Player.TimelineChangeReason;
 import com.google.android.exoplayer2.RenderersFactory;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.Timeline;
 import com.google.android.exoplayer2.Timeline.Period;
 import com.google.android.exoplayer2.castdemo.DemoUtil.Sample;
 import com.google.android.exoplayer2.ext.cast.CastPlayer;
-import com.google.android.exoplayer2.source.DynamicConcatenatingMediaSource;
+import com.google.android.exoplayer2.source.ConcatenatingMediaSource;
 import com.google.android.exoplayer2.source.ExtractorMediaSource;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.dash.DashMediaSource;
-import com.google.android.exoplayer2.source.dash.DefaultDashChunkSource;
 import com.google.android.exoplayer2.source.hls.HlsMediaSource;
-import com.google.android.exoplayer2.source.smoothstreaming.DefaultSsChunkSource;
 import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
 import com.google.android.exoplayer2.trackselection.DefaultTrackSelector;
 import com.google.android.exoplayer2.ui.PlayerControlView;
 import com.google.android.exoplayer2.ui.PlayerView;
-import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter;
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory;
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaMetadata;
@@ -50,11 +49,9 @@ import com.google.android.gms.cast.MediaQueueItem;
 import com.google.android.gms.cast.framework.CastContext;
 import java.util.ArrayList;
 
-/**
- * Manages players and an internal media queue for the ExoPlayer/Cast demo app.
- */
-/* package */ final class PlayerManager extends DefaultEventListener
-    implements CastPlayer.SessionAvailabilityListener {
+/** Manages players and an internal media queue for the ExoPlayer/Cast demo app. */
+/* package */ final class PlayerManager
+    implements EventListener, CastPlayer.SessionAvailabilityListener {
 
   /**
    * Listener for changes in the media queue playback position.
@@ -69,9 +66,8 @@ import java.util.ArrayList;
   }
 
   private static final String USER_AGENT = "ExoCastDemoPlayer";
-  private static final DefaultBandwidthMeter BANDWIDTH_METER = new DefaultBandwidthMeter();
   private static final DefaultHttpDataSourceFactory DATA_SOURCE_FACTORY =
-      new DefaultHttpDataSourceFactory(USER_AGENT, BANDWIDTH_METER);
+      new DefaultHttpDataSourceFactory(USER_AGENT);
 
   private final PlayerView localPlayerView;
   private final PlayerControlView castControlView;
@@ -79,8 +75,8 @@ import java.util.ArrayList;
   private final CastPlayer castPlayer;
   private final ArrayList<DemoUtil.Sample> mediaQueue;
   private final QueuePositionListener queuePositionListener;
+  private final ConcatenatingMediaSource concatenatingMediaSource;
 
-  private DynamicConcatenatingMediaSource dynamicConcatenatingMediaSource;
   private boolean castMediaQueueCreationPending;
   private int currentItemIndex;
   private Player currentPlayer;
@@ -116,10 +112,11 @@ import java.util.ArrayList;
     this.castControlView = castControlView;
     mediaQueue = new ArrayList<>();
     currentItemIndex = C.INDEX_UNSET;
+    concatenatingMediaSource = new ConcatenatingMediaSource();
 
-    DefaultTrackSelector trackSelector = new DefaultTrackSelector(BANDWIDTH_METER);
-    RenderersFactory renderersFactory = new DefaultRenderersFactory(context, null);
-    exoPlayer = ExoPlayerFactory.newSimpleInstance(renderersFactory, trackSelector);
+    DefaultTrackSelector trackSelector = new DefaultTrackSelector();
+    RenderersFactory renderersFactory = new DefaultRenderersFactory(context);
+    exoPlayer = ExoPlayerFactory.newSimpleInstance(context, renderersFactory, trackSelector);
     exoPlayer.addListener(this);
     localPlayerView.setPlayer(exoPlayer);
 
@@ -154,9 +151,8 @@ import java.util.ArrayList;
    */
   public void addItem(Sample sample) {
     mediaQueue.add(sample);
-    if (currentPlayer == exoPlayer) {
-      dynamicConcatenatingMediaSource.addMediaSource(buildMediaSource(sample));
-    } else {
+    concatenatingMediaSource.addMediaSource(buildMediaSource(sample));
+    if (currentPlayer == castPlayer) {
       castPlayer.addItems(buildMediaQueueItem(sample));
     }
   }
@@ -185,9 +181,8 @@ import java.util.ArrayList;
    * @return Whether the removal was successful.
    */
   public boolean removeItem(int itemIndex) {
-    if (currentPlayer == exoPlayer) {
-      dynamicConcatenatingMediaSource.removeMediaSource(itemIndex);
-    } else {
+    concatenatingMediaSource.removeMediaSource(itemIndex);
+    if (currentPlayer == castPlayer) {
       if (castPlayer.getPlaybackState() != Player.STATE_IDLE) {
         Timeline castTimeline = castPlayer.getCurrentTimeline();
         if (castTimeline.getPeriodCount() <= itemIndex) {
@@ -214,9 +209,8 @@ import java.util.ArrayList;
    */
   public boolean moveItem(int fromIndex, int toIndex) {
     // Player update.
-    if (currentPlayer == exoPlayer) {
-      dynamicConcatenatingMediaSource.moveMediaSource(fromIndex, toIndex);
-    } else if (castPlayer.getPlaybackState() != Player.STATE_IDLE) {
+    concatenatingMediaSource.moveMediaSource(fromIndex, toIndex);
+    if (currentPlayer == castPlayer && castPlayer.getPlaybackState() != Player.STATE_IDLE) {
       Timeline castTimeline = castPlayer.getCurrentTimeline();
       int periodCount = castTimeline.getPeriodCount();
       if (periodCount <= fromIndex || periodCount <= toIndex) {
@@ -262,6 +256,7 @@ import java.util.ArrayList;
   public void release() {
     currentItemIndex = C.INDEX_UNSET;
     mediaQueue.clear();
+    concatenatingMediaSource.clear();
     castPlayer.setSessionAvailabilityListener(null);
     castPlayer.release();
     localPlayerView.setPlayer(null);
@@ -281,8 +276,12 @@ import java.util.ArrayList;
   }
 
   @Override
-  public void onTimelineChanged(Timeline timeline, Object manifest) {
+  public void onTimelineChanged(
+      Timeline timeline, @Nullable Object manifest, @TimelineChangeReason int reason) {
     updateCurrentItemIndex();
+    if (timeline.isEmpty()) {
+      castMediaQueueCreationPending = true;
+    }
   }
 
   // CastPlayer.SessionAvailabilityListener implementation.
@@ -349,11 +348,7 @@ import java.util.ArrayList;
     // Media queue management.
     castMediaQueueCreationPending = currentPlayer == castPlayer;
     if (currentPlayer == exoPlayer) {
-      dynamicConcatenatingMediaSource = new DynamicConcatenatingMediaSource();
-      for (int i = 0; i < mediaQueue.size(); i++) {
-        dynamicConcatenatingMediaSource.addMediaSource(buildMediaSource(mediaQueue.get(i)));
-      }
-      exoPlayer.prepare(dynamicConcatenatingMediaSource);
+      exoPlayer.prepare(concatenatingMediaSource);
     }
 
     // Playback transition.
@@ -396,13 +391,9 @@ import java.util.ArrayList;
     Uri uri = Uri.parse(sample.uri);
     switch (sample.mimeType) {
       case DemoUtil.MIME_TYPE_SS:
-        return new SsMediaSource.Factory(
-                new DefaultSsChunkSource.Factory(DATA_SOURCE_FACTORY), DATA_SOURCE_FACTORY)
-            .createMediaSource(uri);
+        return new SsMediaSource.Factory(DATA_SOURCE_FACTORY).createMediaSource(uri);
       case DemoUtil.MIME_TYPE_DASH:
-        return new DashMediaSource.Factory(
-                new DefaultDashChunkSource.Factory(DATA_SOURCE_FACTORY), DATA_SOURCE_FACTORY)
-            .createMediaSource(uri);
+        return new DashMediaSource.Factory(DATA_SOURCE_FACTORY).createMediaSource(uri);
       case DemoUtil.MIME_TYPE_HLS:
         return new HlsMediaSource.Factory(DATA_SOURCE_FACTORY).createMediaSource(uri);
       case DemoUtil.MIME_TYPE_VIDEO_MP4:

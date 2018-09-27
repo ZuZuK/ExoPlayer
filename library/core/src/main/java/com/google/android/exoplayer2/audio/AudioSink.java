@@ -192,26 +192,30 @@ public interface AudioSink {
    * @param outputChannels A mapping from input to output channels that is applied to this sink's
    *     input as a preprocessing step, if handling PCM input. Specify {@code null} to leave the
    *     input unchanged. Otherwise, the element at index {@code i} specifies index of the input
-   *     channel to map to output channel {@code i} when preprocessing input buffers. After the
-   *     map is applied the audio data will have {@code outputChannels.length} channels.
-   * @param trimStartSamples The number of audio samples to trim from the start of data written to
-   *     the sink after this call.
-   * @param trimEndSamples The number of audio samples to trim from data written to the sink
+   *     channel to map to output channel {@code i} when preprocessing input buffers. After the map
+   *     is applied the audio data will have {@code outputChannels.length} channels.
+   * @param trimStartFrames The number of audio frames to trim from the start of data written to the
+   *     sink after this call.
+   * @param trimEndFrames The number of audio frames to trim from data written to the sink
    *     immediately preceding the next call to {@link #reset()} or this method.
    * @throws ConfigurationException If an error occurs configuring the sink.
    */
-  void configure(@C.Encoding int inputEncoding, int inputChannelCount, int inputSampleRate,
-      int specifiedBufferSize, @Nullable int[] outputChannels, int trimStartSamples,
-      int trimEndSamples) throws ConfigurationException;
+  void configure(
+      @C.Encoding int inputEncoding,
+      int inputChannelCount,
+      int inputSampleRate,
+      int specifiedBufferSize,
+      @Nullable int[] outputChannels,
+      int trimStartFrames,
+      int trimEndFrames)
+      throws ConfigurationException;
 
   /**
    * Starts or resumes consuming audio if initialized.
    */
   void play();
 
-  /**
-   * Signals to the sink that the next buffer is discontinuous with the previous buffer.
-   */
+  /** Signals to the sink that the next buffer may be discontinuous with the previous buffer. */
   void handleDiscontinuity();
 
   /**
@@ -277,10 +281,11 @@ public interface AudioSink {
    */
   void setAudioAttributes(AudioAttributes audioAttributes);
 
-  /**
-   * Sets the audio session id.
-   */
+  /** Sets the audio session id. */
   void setAudioSessionId(int audioSessionId);
+
+  /** Sets the auxiliary effect. */
+  void setAuxEffectInfo(AuxEffectInfo auxEffectInfo);
 
   /**
    * Enables tunneling, if possible. The sink is reset if tunneling was previously disabled or if

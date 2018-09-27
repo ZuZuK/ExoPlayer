@@ -20,12 +20,15 @@ import android.support.annotation.Nullable;
 import android.view.ViewGroup;
 import com.google.android.exoplayer2.ExoPlayer;
 import com.google.android.exoplayer2.Timeline;
-import com.google.android.exoplayer2.source.CompositeMediaSource;
+import com.google.android.exoplayer2.source.BaseMediaSource;
 import com.google.android.exoplayer2.source.MediaPeriod;
 import com.google.android.exoplayer2.source.MediaSource;
+import com.google.android.exoplayer2.source.MediaSource.SourceInfoRefreshListener;
 import com.google.android.exoplayer2.source.ads.AdsMediaSource;
 import com.google.android.exoplayer2.upstream.Allocator;
 import com.google.android.exoplayer2.upstream.DataSource;
+import com.google.android.exoplayer2.upstream.TransferListener;
+import java.io.IOException;
 
 /**
  * A {@link MediaSource} that inserts ads linearly with a provided content media source.
@@ -33,10 +36,9 @@ import com.google.android.exoplayer2.upstream.DataSource;
  * @deprecated Use com.google.android.exoplayer2.source.ads.AdsMediaSource with ImaAdsLoader.
  */
 @Deprecated
-public final class ImaAdsMediaSource extends CompositeMediaSource<Void> {
+public final class ImaAdsMediaSource extends BaseMediaSource implements SourceInfoRefreshListener {
 
   private final AdsMediaSource adsMediaSource;
-  private Listener listener;
 
   /**
    * Constructs a new source that inserts ads linearly with the content specified by
@@ -75,10 +77,17 @@ public final class ImaAdsMediaSource extends CompositeMediaSource<Void> {
   }
 
   @Override
-  public void prepareSource(ExoPlayer player, boolean isTopLevelSource, Listener listener) {
-    super.prepareSource(player, isTopLevelSource, listener);
-    this.listener = listener;
-    prepareChildSource(/* id= */ null, adsMediaSource);
+  public void prepareSourceInternal(
+      final ExoPlayer player,
+      boolean isTopLevelSource,
+      @Nullable TransferListener mediaTransferListener) {
+    adsMediaSource.prepareSource(
+        player, isTopLevelSource, /* listener= */ this, mediaTransferListener);
+  }
+
+  @Override
+  public void maybeThrowSourceInfoRefreshError() throws IOException {
+    adsMediaSource.maybeThrowSourceInfoRefreshError();
   }
 
   @Override
@@ -92,8 +101,13 @@ public final class ImaAdsMediaSource extends CompositeMediaSource<Void> {
   }
 
   @Override
-  protected void onChildSourceInfoRefreshed(
-      Void id, MediaSource mediaSource, Timeline timeline, @Nullable Object manifest) {
-    listener.onSourceInfoRefreshed(this, timeline, manifest);
+  public void releaseSourceInternal() {
+    adsMediaSource.releaseSource(/* listener= */ this);
+  }
+
+  @Override
+  public void onSourceInfoRefreshed(
+      MediaSource source, Timeline timeline, @Nullable Object manifest) {
+    refreshSourceInfo(timeline, manifest);
   }
 }
